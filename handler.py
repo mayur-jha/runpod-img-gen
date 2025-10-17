@@ -1,5 +1,5 @@
 import runpod
-from runpod.serverless.utils import rp_upload
+import boto3
 import json
 import urllib.request
 import urllib.parse
@@ -7,12 +7,21 @@ import time
 import os
 import requests
 import base64
+import io
 from io import BytesIO
 import websocket
 import uuid
 import tempfile
 import socket
 import traceback
+import piexif
+import ffmpeg
+import re, yaml, uuid
+import tempfile, mime, mimetypes
+from fastapi import FastAPI, HTTPException, Body
+from pydantic import BaseModel
+from pathlib import Path
+from PIL import Image, PngImagePlugin
 
 # Time to wait between API check attempts in milliseconds
 COMFY_API_AVAILABLE_INTERVAL_MS = 50
@@ -474,6 +483,69 @@ def get_image_data(filename, subfolder, image_type):
         )
         return None
 
+def download_lora_from_s3(user_id, model_id):
+    try:
+        s3 = boto3.client('s3', aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'), aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'))
+        key = f"{user_id}/{model_id}/loras/{user_id}_{model_id}.safetensors"
+        s3.download_file("aiofm", key, "/workspace/ComfyUI/models/loras/{user_id}_{model_id}.safetensors")
+    except Exception as e:
+        raise RuntimeError(f"Preparing Training Data failed")
+    
+def b64_to_bytes(s: str) -> bytes:
+    if s.startswith("data:"):
+        s = s.split(",", 1)[1]
+    s = "".join(s.split())
+    try:
+        return base64.b64decode(s, validate=True)
+    except Exception:
+        return base64.urlsafe_b64decode(s + "===")
+
+def bytes_to_b64(b: bytes) -> str:
+    return base64.b64encode(b).decode("utf-8")
+
+def add_metadata_image(base64_image):
+    raw = b64_to_bytes(base64_image)
+    img = Image.open(io.BytesIO(raw))
+    fmt = (img.format or "").upper()
+
+    # PNG → write PNG tEXt chunks (keeps PNG, no conversion)
+    if fmt == "PNG":
+        png_info = PngImagePlugin.PngInfo()
+        png_info.add_text("Author", "EMMA")
+
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", pnginfo=png_info)
+        buf.seek(0)
+        return {"file_base64": bytes_to_b64(buf.read()), "format": "PNG", "metadata_type": "tEXt"}
+
+    # JPEG/JPG/JFIF → write EXIF
+    if fmt in {"JPEG", "JPG", "JFIF"}:
+        # make sure EXIF dict exists
+        exif_dict = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": None}
+        exif_dict["0th"][piexif.ImageIFD.Artist] = "EMMA"
+
+        # ensure compatible mode for JPEG
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", exif=exif_bytes, quality=95)
+        buf.seek(0)
+        return {"file_base64": bytes_to_b64(buf.read()), "format": "JPEG", "metadata_type": "EXIF"}
+
+    # Other formats → return as-is (or convert to JPEG with EXIF if you want)
+    out = io.BytesIO()
+    img.save(out, format=fmt or "PNG")
+    out.seek(0)
+    return bytes_to_b64(out.read())
+
+def upload_to_s3(user_id, model_id, base64_image, filename, gen_type):
+    s3 = boto3.client('s3', aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'), aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'))
+    bucket_name = os.getenv('S3_BUCKET_NAME')
+    
+    s3.upload_file(base64_image, bucket_name, f"{user_id}/{model_id}/images/{gen_type}/{filename}.png")
+    image_s3_url = f"s3://{bucket_name}/{user_id}/{model_id}/images/{gen_type}/{filename}.png"
+    return image_s3_url
 
 def handler(job):
     """
@@ -486,7 +558,12 @@ def handler(job):
         dict: A dictionary containing either an error message or a success status with generated images.
     """
     job_input = job["input"]
-    job_id = job["id"]
+    gen_type = job["gen_type"]
+    user_id = job["user_id"]
+    model_id = job["model_id"]
+
+    if gen_type not in ["sfw", "nsfw"]:
+        return {"error": f"Invalid gen_type '{gen_type}'. Must be 'sfw' or 'nsfw'."}
 
     # Make sure that the input is valid
     validated_data, error_message = validate_input(job_input)
@@ -530,7 +607,7 @@ def handler(job):
         ws = websocket.WebSocket()
         ws.connect(ws_url, timeout=10)
         print(f"worker-comfyui - Websocket connected")
-
+        download_lora_from_s3(user_id, model_id)
         # Queue the workflow
         try:
             queued_workflow = queue_workflow(workflow, client_id)
@@ -671,64 +748,26 @@ def handler(job):
 
                     if image_bytes:
                         file_extension = os.path.splitext(filename)[1] or ".png"
-
-                        if os.environ.get("BUCKET_ENDPOINT_URL"):
-                            try:
-                                with tempfile.NamedTemporaryFile(
-                                    suffix=file_extension, delete=False
-                                ) as temp_file:
-                                    temp_file.write(image_bytes)
-                                    temp_file_path = temp_file.name
-                                print(
-                                    f"worker-comfyui - Wrote image bytes to temporary file: {temp_file_path}"
-                                )
-
-                                print(f"worker-comfyui - Uploading {filename} to S3...")
-                                s3_url = rp_upload.upload_image(job_id, temp_file_path)
-                                os.remove(temp_file_path)  # Clean up temp file
-                                print(
-                                    f"worker-comfyui - Uploaded {filename} to S3: {s3_url}"
-                                )
-                                # Append dictionary with filename and URL
-                                output_data.append(
-                                    {
-                                        "filename": filename,
-                                        "type": "s3_url",
-                                        "data": s3_url,
-                                    }
-                                )
-                            except Exception as e:
-                                error_msg = f"Error uploading {filename} to S3: {e}"
-                                print(f"worker-comfyui - {error_msg}")
-                                errors.append(error_msg)
-                                if "temp_file_path" in locals() and os.path.exists(
-                                    temp_file_path
-                                ):
-                                    try:
-                                        os.remove(temp_file_path)
-                                    except OSError as rm_err:
-                                        print(
-                                            f"worker-comfyui - Error removing temp file {temp_file_path}: {rm_err}"
-                                        )
-                        else:
-                            # Return as base64 string
-                            try:
-                                base64_image = base64.b64encode(image_bytes).decode(
-                                    "utf-8"
-                                )
-                                # Append dictionary with filename and base64 data
-                                output_data.append(
-                                    {
-                                        "filename": filename,
-                                        "type": "base64",
-                                        "data": base64_image,
-                                    }
-                                )
-                                print(f"worker-comfyui - Encoded {filename} as base64")
-                            except Exception as e:
-                                error_msg = f"Error encoding {filename} to base64: {e}"
-                                print(f"worker-comfyui - {error_msg}")
-                                errors.append(error_msg)
+                        # Return as base64 string
+                        try:
+                            base64_image = base64.b64encode(image_bytes).decode(
+                                "utf-8"
+                            )
+                            base64_image = add_metadata_image(base64_image)
+                            s3_url = upload_to_s3(user_id, model_id, base64_image, filename, gen_type)
+                            # Append dictionary with filename and base64 data
+                            output_data.append(
+                                {
+                                    "filename": filename,
+                                    "type": "base64",
+                                    "data": s3_url,
+                                }
+                            )
+                            print(f"worker-comfyui - Encoded {filename} as base64")
+                        except Exception as e:
+                            error_msg = f"Error encoding {filename} to base64: {e}"
+                            print(f"worker-comfyui - {error_msg}")
+                            errors.append(error_msg)
                     else:
                         error_msg = f"Failed to fetch image data for {filename} from /view endpoint."
                         errors.append(error_msg)

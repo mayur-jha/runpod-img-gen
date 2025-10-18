@@ -17,7 +17,7 @@ import traceback
 import piexif
 import ffmpeg
 import re, yaml, uuid
-import tempfile, mime, mimetypes
+import tempfile, mimetypes
 from fastapi import FastAPI, HTTPException, Body
 from pydantic import BaseModel
 from pathlib import Path

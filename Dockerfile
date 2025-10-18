@@ -1,7 +1,5 @@
 FROM runpod/worker-comfyui:5.4.1-flux1-dev
 
-COPY . /workspace/repo
-
 COPY scripts/comfy-node-install.sh /usr/local/bin/comfy-node-install
 COPY scripts/comfy-manager-set-mode.sh /usr/local/bin/comfy-manager-set-mode
 RUN chmod +x /usr/local/bin/comfy-node-install /usr/local/bin/comfy-manager-set-mode
@@ -17,7 +15,7 @@ RUN pip install boto3 piexif ffmpeg-python
 
 RUN comfy-node-install ComfyLiterals \
   ComfyUI-Crystools \
-  ComfyUI-Custom-Scripts \
+  comfyui-custom-scripts \
   ComfyUI-GGUF \
   ComfyUI-HunyuanVideoMultiLora \
   ComfyUI-ImageMotionGuider \
@@ -27,9 +25,9 @@ RUN comfy-node-install ComfyLiterals \
   ComfyUI-WanMoeKSampler \
   ComfyUI-WanVideoWrapper \
   ComfyUI-nunchaku \
-  ComfyUI-segment-anything-2 \
+  comfyui-segment-anything-2 \
   ComfyUI_JPS-Nodes \
-  ComfyUI_essentials \
+  comfyui_essentials \
   Comfyui-ergouzi-Nodes \
   Comfyui_joy-caption-alpha-two \
   RES4LYF \
@@ -40,22 +38,24 @@ RUN comfy-node-install ComfyLiterals \
   comfyui-dream-project \
   comfyui-easy-use \
   comfyui-frame-interpolation \
-  ComfyUI-Impact-Pack \
-  ComfyUI-Inspire-Pack \
+  comfyui-impact-pack \
+  comfyui-inspire-pack \
   comfyui-kjnodes \
-  ComfyUI-mxToolkit \
+  comfyui-mxtoolkit \
   comfyui-reactor \
   comfyui-various \
-  ComfyUI-VideoHelperSuite \
+  comfyui-videohelpersuite \
   comfyui_controlnet_aux \
   comfyui_slk_joy_caption_two \
   comfyui_ttp_toolset \
-  ComfyUI_UltimateSDUpscale \
-  ControlAltAI-Nodes \
+  comfyui_ultimatesdupscale \
+  controlaltai-nodes \
   ea-nodes \
   jovimetrix \
   rgthree-comfy \
   was-ns
+
+
 
 RUN wget --content-disposition https://fluxloraimage.s3.us-east-1.amazonaws.com/flux_pussy_spread.safetensors -O /comfyui/models/loras/flux_pussy_spread.safetensors
 RUN wget --content-disposition https://fluxloraimage.s3.us-east-1.amazonaws.com/flux_dildo_riding.safetensors -O /comfyui/models/loras/flux_dildo_riding.safetensors

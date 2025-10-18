@@ -163,6 +163,18 @@ def validate_input(job_input):
     if workflow is None:
         return None, "Missing 'workflow' parameter"
 
+    gen_type = job_input.get("gen_type")
+    if gen_type not in ["sfw", "nsfw"]:
+        return None, "Invalid 'gen_type' parameter; must be 'sfw' or 'nsfw'"
+    
+    user_id = job_input.get("user_id")
+    if user_id is None:
+        return None, "Missing 'user_id' parameter"
+    
+    model_id = job_input.get("model_id")
+    if model_id is None:
+        return None, "Missing 'model_id' parameter"
+    
     # Validate 'images' in input, if provided
     images = job_input.get("images")
     if images is not None:
@@ -175,7 +187,7 @@ def validate_input(job_input):
             )
 
     # Return validated data and no error
-    return {"workflow": workflow, "images": images}, None
+    return {"workflow": workflow, "images": images, "gen_type": gen_type, "user_id": user_id, "model_id": model_id}, None
 
 
 def check_server(url, retries=500, delay=50):
@@ -487,8 +499,10 @@ def download_lora_from_s3(user_id, model_id):
     try:
         s3 = boto3.client('s3', aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'), aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'))
         key = f"{user_id}/{model_id}/loras/{user_id}_{model_id}.safetensors"
-        s3.download_file("aiofm", key, "/workspace/ComfyUI/models/loras/{user_id}_{model_id}.safetensors")
+        s3.download_file("aiofm", key, "/comfyui/models/loras/{user_id}_{model_id}.safetensors")
+        print(f"worker-comfyui - Successfully downloaded LORA from S3: {key}")
     except Exception as e:
+        print(f"worker-comfyui - Error downloading LORA from S3: {e}")
         raise RuntimeError(f"Preparing Training Data failed")
     
 def b64_to_bytes(s: str) -> bytes:
@@ -558,12 +572,6 @@ def handler(job):
         dict: A dictionary containing either an error message or a success status with generated images.
     """
     job_input = job["input"]
-    gen_type = job["gen_type"]
-    user_id = job["user_id"]
-    model_id = job["model_id"]
-
-    if gen_type not in ["sfw", "nsfw"]:
-        return {"error": f"Invalid gen_type '{gen_type}'. Must be 'sfw' or 'nsfw'."}
 
     # Make sure that the input is valid
     validated_data, error_message = validate_input(job_input)
@@ -573,6 +581,9 @@ def handler(job):
     # Extract validated data
     workflow = validated_data["workflow"]
     input_images = validated_data.get("images")
+    gen_type = validated_data.get("gen_type")
+    user_id = validated_data.get("user_id")
+    model_id = validated_data.get("model_id")
 
     # Make sure that the ComfyUI HTTP API is available before proceeding
     if not check_server(

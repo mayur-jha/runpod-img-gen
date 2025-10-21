@@ -503,7 +503,7 @@ def download_lora_from_s3(user_id, model_id):
         print(f"worker-comfyui - Successfully downloaded LORA from S3: {key}")
     except Exception as e:
         print(f"worker-comfyui - Error downloading LORA from S3: {e}")
-        raise RuntimeError(f"Preparing Training Data failed")
+        raise RuntimeError(f"Lora Downloading failed")
     
 def b64_to_bytes(s: str) -> bytes:
     if s.startswith("data:"):
@@ -517,41 +517,20 @@ def b64_to_bytes(s: str) -> bytes:
 def bytes_to_b64(b: bytes) -> str:
     return base64.b64encode(b).decode("utf-8")
 
-def add_metadata_image(base64_image):
-    raw = b64_to_bytes(base64_image)
-    img = Image.open(io.BytesIO(raw))
-    fmt = (img.format or "").upper()
+def add_metadata_image(image_bytes):
+    metadata = {"Author": "EMMA"}
+    # Load original image from bytes
+    img = Image.open(BytesIO(image_bytes))
 
-    # PNG → write PNG tEXt chunks (keeps PNG, no conversion)
-    if fmt == "PNG":
-        png_info = PngImagePlugin.PngInfo()
-        png_info.add_text("Author", "EMMA")
+    # Create metadata container
+    pnginfo = PngImagePlugin.PngInfo()
+    for key, value in metadata.items():
+        pnginfo.add_text(key, str(value))
 
-        buf = io.BytesIO()
-        img.save(buf, format="PNG", pnginfo=png_info)
-        buf.seek(0)
-        return {"file_base64": bytes_to_b64(buf.read()), "format": "PNG", "metadata_type": "tEXt"}
-
-    # JPEG/JPG/JFIF → write EXIF
-    if fmt in {"JPEG", "JPG", "JFIF"}:
-        # make sure EXIF dict exists
-        exif_dict = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": None}
-        exif_dict["0th"][piexif.ImageIFD.Artist] = "EMMA"
-
-        # ensure compatible mode for JPEG
-        if img.mode not in ("RGB", "L"):
-            img = img.convert("RGB")
-
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", exif=exif_bytes, quality=95)
-        buf.seek(0)
-        return {"file_base64": bytes_to_b64(buf.read()), "format": "JPEG", "metadata_type": "EXIF"}
-
-    # Other formats → return as-is (or convert to JPEG with EXIF if you want)
-    out = io.BytesIO()
-    img.save(out, format=fmt or "PNG")
-    out.seek(0)
-    return bytes_to_b64(out.read())
+    # Save to memory with new metadata
+    output = BytesIO()
+    img.save(output, format="PNG", pnginfo=pnginfo)
+    return output.getvalue()
 
 def upload_to_s3(user_id, model_id, base64_image, filename, gen_type):
     s3 = boto3.client('s3', aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'), aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'))
@@ -761,10 +740,7 @@ def handler(job):
                         file_extension = os.path.splitext(filename)[1] or ".png"
                         # Return as base64 string
                         try:
-                            base64_image = base64.b64encode(image_bytes).decode(
-                                "utf-8"
-                            )
-                            base64_image = add_metadata_image(base64_image)
+                            base64_image = add_metadata_image(image_bytes)
                             s3_url = upload_to_s3(user_id, model_id, base64_image, filename, gen_type)
                             # Append dictionary with filename and base64 data
                             output_data.append(

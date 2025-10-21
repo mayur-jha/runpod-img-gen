@@ -499,7 +499,7 @@ def download_lora_from_s3(user_id, model_id):
     try:
         s3 = boto3.client('s3', aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'), aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'))
         key = f"{user_id}/{model_id}/loras/{user_id}_{model_id}.safetensors"
-        s3.download_file("aiofm", key, "/comfyui/models/loras/{user_id}_{model_id}.safetensors")
+        s3.download_file("aiofmprod", key, "/comfyui/models/loras/{user_id}_{model_id}.safetensors")
         print(f"worker-comfyui - Successfully downloaded LORA from S3: {key}")
     except Exception as e:
         print(f"worker-comfyui - Error downloading LORA from S3: {e}")

@@ -504,18 +504,7 @@ def download_lora_from_s3(user_id, model_id):
     except Exception as e:
         print(f"worker-comfyui - Error downloading LORA from S3: {e}")
         raise RuntimeError(f"Lora Downloading failed")
-    
-def b64_to_bytes(s: str) -> bytes:
-    if s.startswith("data:"):
-        s = s.split(",", 1)[1]
-    s = "".join(s.split())
-    try:
-        return base64.b64decode(s, validate=True)
-    except Exception:
-        return base64.urlsafe_b64decode(s + "===")
 
-def bytes_to_b64(b: bytes) -> str:
-    return base64.b64encode(b).decode("utf-8")
 
 def add_metadata_image(image_bytes):
     metadata = {"Author": "EMMA"}

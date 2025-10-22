@@ -164,8 +164,8 @@ def validate_input(job_input):
         return None, "Missing 'workflow' parameter"
 
     gen_type = job_input.get("gen_type")
-    if gen_type not in ["sfw", "nsfw"]:
-        return None, "Invalid 'gen_type' parameter; must be 'sfw' or 'nsfw'"
+    if gen_type not in ["sfw", "nsfw", "model", "training"]:
+        return None, "Invalid 'gen_type' parameter; must be 'sfw', 'nsfw', 'model', or 'training'"
     
     user_id = job_input.get("user_id")
     if user_id is None:
@@ -499,7 +499,7 @@ def download_lora_from_s3(user_id, model_id):
     try:
         s3 = boto3.client('s3', aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'), aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'))
         key = f"{user_id}/{model_id}/loras/{user_id}_{model_id}.safetensors"
-        s3.download_file("aiofmprod", key, "/comfyui/models/loras/{user_id}_{model_id}.safetensors")
+        s3.download_file(os.getenv('S3_BUCKET_NAME'), key, "/comfyui/models/loras/{user_id}_{model_id}.safetensors")
         print(f"worker-comfyui - Successfully downloaded LORA from S3: {key}")
     except Exception as e:
         print(f"worker-comfyui - Error downloading LORA from S3: {e}")
@@ -521,11 +521,15 @@ def add_metadata_image(image_bytes):
     img.save(output, format="PNG", pnginfo=pnginfo)
     return output.getvalue()
 
-def upload_to_s3(user_id, model_id, base64_image, filename, gen_type):
+def upload_to_s3(user_id, model_id, image_bytes, filename, gen_type):
     s3 = boto3.client('s3', aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'), aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'))
     bucket_name = os.getenv('S3_BUCKET_NAME')
     
-    s3.upload_file(base64_image, bucket_name, f"{user_id}/{model_id}/images/{gen_type}/{filename}.png")
+    s3.put_object(
+        Bucket=bucket_name,
+        Key="{}/{}/images/{}/{}.png".format(user_id, model_id, gen_type, filename),
+        Body=image_bytes
+    )
     image_s3_url = f"s3://{bucket_name}/{user_id}/{model_id}/images/{gen_type}/{filename}.png"
     return image_s3_url
 
@@ -586,7 +590,8 @@ def handler(job):
         ws = websocket.WebSocket()
         ws.connect(ws_url, timeout=10)
         print(f"worker-comfyui - Websocket connected")
-        download_lora_from_s3(user_id, model_id)
+        if gen_type in ["nsfw", "sfw"]:
+            download_lora_from_s3(user_id, model_id)
         # Queue the workflow
         try:
             queued_workflow = queue_workflow(workflow, client_id)
@@ -730,7 +735,12 @@ def handler(job):
                         # Return as base64 string
                         try:
                             base64_image = add_metadata_image(image_bytes)
-                            s3_url = upload_to_s3(user_id, model_id, base64_image, filename, gen_type)
+                            try:
+                                s3_url = upload_to_s3(user_id, model_id, base64_image, filename, gen_type)
+                            except Exception as e:
+                                error_msg = f"Error uploading {filename} to S3: {e}"
+                                print(f"worker-comfyui - {error_msg}")
+                                errors.append(error_msg)
                             # Append dictionary with filename and base64 data
                             output_data.append(
                                 {

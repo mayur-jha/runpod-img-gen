@@ -13,47 +13,7 @@ COPY src/extra_model_paths.yaml /comfyui/extra_model_paths.yaml
 
 RUN pip install boto3 piexif ffmpeg-python
 
-RUN comfy-node-install ComfyLiterals \
-  ComfyUI-Crystools \
-  comfyui-custom-scripts \
-  ComfyUI-GGUF \
-  ComfyUI-HunyuanVideoMultiLora \
-  ComfyUI-ImageMotionGuider \
-  ComfyUI-JoyCaption \
-  ComfyUI-Manager \
-  ComfyUI-MediaMixer \
-  ComfyUI-WanMoeKSampler \
-  ComfyUI-WanVideoWrapper \
-  ComfyUI-nunchaku \
-  comfyui-segment-anything-2 \
-  ComfyUI_JPS-Nodes \
-  comfyui_essentials \
-  Comfyui-ergouzi-Nodes \
-  Comfyui_joy-caption-alpha-two \
-  RES4LYF \
-  cg-use-everywhere \
-  comfy-image-saver \
-  comfyui-denoisechooser \
-  comfyui-detail-daemon \
-  comfyui-dream-project \
-  comfyui-easy-use \
-  comfyui-frame-interpolation \
-  comfyui-impact-pack \
-  comfyui-inspire-pack \
-  comfyui-kjnodes \
-  comfyui-mxtoolkit \
-  comfyui-reactor \
-  comfyui-various \
-  comfyui-videohelpersuite \
-  comfyui_controlnet_aux \
-  comfyui_slk_joy_caption_two \
-  comfyui_ttp_toolset \
-  comfyui_ultimatesdupscale \
-  controlaltai-nodes \
-  ea-nodes \
-  jovimetrix \
-  rgthree-comfy \
-  was-ns
+RUN comfy-node-install controlaltai-nodes comfyui-easy-use
 
 
 
